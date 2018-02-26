@@ -18,7 +18,8 @@ const url = require('url')
 const binarycase = require('binary-case')
 
 function getPathWithQueryStringParams(event) {
-  return url.format({ pathname: event.path, query: event.queryStringParameters })
+    const path = url.format({ pathname: event.path, query: event.queryStringParameters });
+    return path ? path : "/";
 }
 
 function getContentType(params) {
@@ -35,11 +36,12 @@ function mapApiGatewayEventToHttpRequest(event, context, socketPath) {
     const eventWithoutBody = Object.assign({}, event)
     delete eventWithoutBody.body
 
+    headers['Content-Type'] = 'application/json';
     headers['x-apigateway-event'] = encodeURIComponent(JSON.stringify(eventWithoutBody))
     headers['x-apigateway-context'] = encodeURIComponent(JSON.stringify(context))
 
     return {
-        method: event.httpMethod,
+        method: event.httpMethod ? event.httpMethod : 'POST',
         path: getPathWithQueryStringParams(event),
         headers,
         socketPath
@@ -82,7 +84,7 @@ function forwardResponseToApiGateway(server, response, context) {
             const contentType = getContentType({ contentTypeHeader: headers['content-type'] })
             const isBase64Encoded = isContentTypeBinaryMimeType({ contentType, binaryMimeTypes: server._binaryTypes })
             const body = bodyBuffer.toString(isBase64Encoded ? 'base64' : 'utf8')
-            const successResponse = {statusCode, body, headers, isBase64Encoded}
+            const successResponse = JSON.parse(body);
 
             context.succeed(successResponse)
         })
@@ -116,12 +118,12 @@ function forwardRequestToNodeServer(server, event, context) {
     try {
         const requestOptions = mapApiGatewayEventToHttpRequest(event, context, getSocketPath(server._socketPathSuffix))
         const req = http.request(requestOptions, (response, body) => forwardResponseToApiGateway(server, response, context))
-        if (event.body) {
+        if (event) {
             if (event.isBase64Encoded) {
-                event.body = new Buffer(event.body, 'base64')
+                event = new Buffer(JSON.stringify(event), 'base64')
             }
 
-            req.write(event.body)
+            req.write(JSON.stringify(event))
         }
 
         req.on('error', (error) => forwardConnectionErrorResponseToApiGateway(server, error, context))
@@ -200,3 +202,4 @@ if (process.env.NODE_ENV === 'test') {
     exports.startServer = startServer
     exports.getSocketPath = getSocketPath
 }
+
